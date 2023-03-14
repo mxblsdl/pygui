@@ -11,127 +11,16 @@ from PyQt5.QtWidgets import (
 )
 
 from clockify_api_client.client import ClockifyAPIClient
-import qdarkstyle
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 import polars as pl
 
 
-def get_project_durations():
-    # initialize client
-    client = api_prompt()
-
-    # Return the workspace id and user id
-    # This assumes there is only one workspace for the user
-    workspace_id, user_id = get_ids(client)
-    projs = client.projects.get_projects(workspace_id)
-    # Get all time entries
-    # Params passed as dictionary items that filter results
-    out = pl.DataFrame()
-
-    dt = datetime.today()
-    start = dt - timedelta(days=dt.weekday()) - timedelta(weeks=weeks_back)
-    start = start.replace(hour=0)  # set to beginning of day
-    end = start + timedelta(days=6)
-
-    for proj in projs:
-        # Make API call from start date
-        entries = client.time_entries.get_time_entries(
-            workspace_id,
-            user_id,
-            params={
-                "project": proj["id"],
-                "page-size": 500,
-                "start": start.isoformat() + "Z",
-                "end": end.isoformat() + "Z",
-            },
-        )
-        if not entries:
-            continue
-
-        # Parse results by project
-        e = [e["timeInterval"] for e in entries]
-        df = pl.DataFrame(e)
-        df = create_cols(df, proj)
-
-        # short circuit the for loop with agg data
-        if weekly:
-            df = df.groupby(["name", "date"]).agg(pl.col("duration").sum().round(2))
-            out = pl.concat([out, df])
-            continue
-
-        table = create_table(
-            start, end, total_hours=round(df["duration"].sum(), ndigits=2)
-        )
-        for row in df.iter_rows(named=True):
-            table.add_row(str(row["date"]), row["name"], str(round(row["duration"], 2)))
-
-        print(table)
-
-    if weekly:
-        out = out.sort("date")
-        out = out.with_columns(pl.col("duration").round(2))
-
-        table = create_table(
-            start, end, total_hours=round(out["duration"].sum(), ndigits=2)
-        )
-
-        for idx, ind in enumerate(out.iter_rows(named=True)):
-            table.add_row(
-                str(ind["date"]),
-                ind["name"],
-                str(ind["duration"]),
-            )
-
-            # End table creation with final break
-            if out[idx + 1].is_empty():
-                subtotal(out, table, idx)
-                break
-
-            # Add break between dates
-            if out["date"][idx] != out["date"][idx + 1]:
-                subtotal(out, table, idx)
-        print(table)
-
-
 def subtotal(out, table, idx):
     day_total = out.filter(pl.col("date") == out["date"][idx])
     table.add_row("", "Subtotal", str(round(day_total["duration"].sum(), 2)))
     table.add_section()
-
-
-# def check_api(API_URL="api.clockify.me/v1"):
-#     config_file = Path.home() / ".clock.config"
-#     if not config_file.exists():
-#         print("API Key has not been configured.")
-#         api = input("Enter your API key")
-#         print(f"Using API version: {API_URL}")
-#         try:
-#             client = ClockifyAPIClient().build(api, API_URL)
-#         except:
-#             print("Problem with API key\nMake sure your key was entered correctly")
-#         print("API key entered successfully!")
-#         res = input("Would you like to save the API for future use? (y/n)")
-
-#         while res.lower() not in ["y", "n"]:
-#             res = input("Please enter either 'y' or 'n'")
-
-#         if res.lower() == "y":
-#             config_file.touch()
-#             config_file.write_text(f"""API_KEY={api}""")
-#             return client
-
-#         return client
-#     else:
-#         print("Using stored API Credentials")
-#         api_text = config_file.read_text()
-#         api_text = api_text.split("=")
-#         try:
-#             client = ClockifyAPIClient().build(api_text[1], API_URL)
-#         except:
-#             print("Problem with API key\nMake sure your key was entered correctly")
-#         return client
 
 
 class TableWidget(QTableWidget):
@@ -153,19 +42,6 @@ class TableWidget(QTableWidget):
             self.setItem(idx, 0, QTableWidgetItem(ind["name"]))
             self.setItem(idx, 1, QTableWidgetItem(str(ind["date"])))
             self.setItem(idx, 2, QTableWidgetItem(str(ind["duration"])))
-
-        # # Set window size
-        # x = self.verticalHeader().size().width()
-        # for i in range(self.columnCount()):
-        #     x += self.columnWidth(i)
-
-        # y = self.horizontalHeader().size().height()
-        # for i in range(self.rowCount()):
-        #     y += self.rowHeight(i)
-
-        # self.setFixedSize(x, y)
-
-        # print(data)
 
 
 class MainWindow(QMainWindow):
@@ -286,8 +162,6 @@ class MainWindow(QMainWindow):
 
 
 app = QApplication(sys.argv)
-# app.setStyleSheet(qdarkstyle.load_stylesheet())
-
 w = MainWindow()
 w.show()
 app.exec()
